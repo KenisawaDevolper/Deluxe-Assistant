@@ -33,22 +33,29 @@ module.exports = async function deluxeAssistant(sock, m, store) {
         const q = args.join(' ');
         const from = m.key.remoteJid;
         const isGroup = from.endsWith('@g.us');
-        const botNumber = await sock.decodeJid(sock.user.id);
+        const botNumber = sock.decodeJid(sock.user?.id || sock.user?.jid || '');
+        const sender = sock.decodeJid(m.sender || m.key.participant || m.key.remoteJid || '');
+
         const premium = JSON.parse(fs.readFileSync('./lib/database/premium.json'));
-        const isPremium = premium.includes(m.sender);
+        const isPremium = premium.includes(sender);
         const isCreator = [botNumber, ...(global.owner || [])]
-            .map(value => value.replace(/[^0-9]/g, '') + '@s.whatsapp.net')
-            .includes(m.sender);
+            .map(value => String(value).replace(/[^0-9]/g, '') + '@s.whatsapp.net')
+            .includes(sender);
+
         const pushname = m.pushName || 'sin nombre';
         const quoted = m.quoted || m;
         const mime = (quoted.msg || quoted).mimetype || '';
         const reply = text => sock.sendMessage(m.chat, { text }, { quoted: m });
-        const groupMetadata = isGroup ? await sock.groupMetadata(m.chat).catch(() => null) : null;
-        const groupAdmins = groupMetadata
-            ? groupMetadata.participants.filter(participant => participant.admin).map(participant => participant.id)
-            : [];
-        const isGroupAdmins = isGroup && groupAdmins.includes(m.sender);
+
+        const groupMetadata = isGroup ? (await sock.groupMetadata(m.chat).catch(() => null) || store?.chats?.get(m.chat)?.groupMetadata) : null;
+        const participants = groupMetadata?.participants || [];
+        const groupAdmins = participants
+            .filter(participant => participant.admin === 'admin' || participant.admin === 'superadmin' || participant.admin)
+            .map(participant => sock.decodeJid(participant.id));
+
+        const isGroupAdmins = isGroup && groupAdmins.includes(sender);
         const isBotGroupAdmins = isGroup && groupAdmins.includes(botNumber);
+
         const thumb = await sharp('./lib/media/thumb.jpg')
             .resize(300, 300)
             .jpeg({ quality: 80 })
@@ -58,7 +65,7 @@ module.exports = async function deluxeAssistant(sock, m, store) {
 
         await dispatch({
             sock, m, store, body, budy: m.text || body, bodyTrim, command, args, q,
-            prefix, hasPrefix, from, isGroup, botNumber, isPremium, isCreator,
+            prefix, hasPrefix, from, isGroup, botNumber, sender, isPremium, isCreator,
             pushname, quoted, mime, groupMetadata, groupAdmins, isGroupAdmins,
             isBotGroupAdmins, thumb,
             date: tanggal(Date.now()), runtime, reply
